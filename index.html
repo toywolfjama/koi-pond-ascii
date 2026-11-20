@@ -304,6 +304,31 @@ function eat(f,p){
   sfxGulp(pan(p.x));
 }
 
+const PWID=new Float32Array(NSEG);for(let i=0;i<NSEG;i++)PWID[i]=prof(i/(NSEG-1));
+function resolveCollisions(){
+  const n=fish.length;
+  for(let it=0;it<2;it++){
+    for(let a=0;a<n;a++)for(let b=a+1;b<n;b++){
+      const A=fish[a],B=fish[b],PA=A.p,PB=B.p;
+      const qx=PA[2*6]-PB[2*6],qy=PA[2*6+1]-PB[2*6+1],lim=(A.L+B.L)*0.6;
+      if(qx*qx+qy*qy>lim*lim)continue;
+      for(let i=0;i<NSEG;i++){
+        const ra=A.L*0.15*PWID[i]*A.girth;
+        for(let j=0;j<NSEG;j++){
+          const rb=B.L*0.15*PWID[j]*B.girth,md=ra+rb+0.45;
+          const dx=PA[2*i]-PB[2*j],dy=PA[2*i+1]-PB[2*j+1],d2=dx*dx+dy*dy;
+          if(d2>=md*md)continue;
+          const d=Math.sqrt(d2)||1e-3,push=(md-d)*0.5,nx=d2>1e-6?dx/d:Math.cos(A.h+1.57),ny=d2>1e-6?dy/d:Math.sin(A.h+1.57);
+          PA[2*i]+=nx*push;PA[2*i+1]+=ny*push;PB[2*j]-=nx*push;PB[2*j+1]-=ny*push;
+        }
+      }
+    }
+    for(const f of fish){
+      const seg=f.L/(NSEG-1),P=f.p;
+      for(let i=1;i<NSEG;i++){const dx=P[2*i-2]-P[2*i],dy=P[2*i-1]-P[2*i+1];const d=Math.hypot(dx,dy)||1e-6;P[2*i]=P[2*i-2]-dx/d*seg;P[2*i+1]=P[2*i-1]-dy/d*seg;}
+    }
+  }
+}
 function updateFish(dt){
   for(const f of fish){
     const hx=f.p[0],hy=f.p[1];
@@ -339,8 +364,25 @@ function updateFish(dt){
     const dp=pondD(hx+Math.cos(f.h)*look,hy+Math.sin(f.h)*look),dh=pondD(hx,hy);
     if(chasing){if(dh>-0.6){desired=Math.atan2(pond.cy-hy,pond.cx-hx);rate=Math.max(rate,3);}}
     else{const lim=-f.L*0.35;if(dp>lim||dh>-1.2){desired=Math.atan2(pond.cy-hy,pond.cx-hx);rate=Math.max(rate,1.4+clamp((dp-lim)*0.6,0,3));}}
-    const lim2=(f.L*0.3)*(f.L*0.3);
-    for(const o of fish){if(o===f)continue;for(let i=0;i<NSEG;i+=3){const ox=o.p[2*i]-hx,oy=o.p[2*i+1]-hy;if(ox*ox+oy*oy<lim2){const cr=Math.cos(f.h)*oy-Math.sin(f.h)*ox;f.h-=(cr>=0?1:-1)*(chasing?0.6:1.8)*dt;break;}}}
+    {
+      const ch=Math.cos(f.h),shh=Math.sin(f.h),reach=f.L*0.65;
+      let steer=0,slow=1;
+      for(const o of fish){
+        if(o===f)continue;
+        const qx=o.p[0]-hx,qy=o.p[1]-hy;if(qx*qx+qy*qy>(reach+o.L)*(reach+o.L))continue;
+        for(let i=0;i<NSEG;i+=2){
+          const ox=o.p[2*i]-hx,oy=o.p[2*i+1]-hy,d=Math.hypot(ox,oy);
+          if(d>reach||d<1e-4)continue;
+          const fwd=(ox*ch+oy*shh)/d;if(fwd<-0.2)continue;
+          const k=(1-d/reach)*(0.4+0.6*Math.max(0,fwd));
+          const cr=ch*oy-shh*ox;
+          steer-=(cr>=0?1:-1)*k;
+          if(fwd>0.5)slow=Math.min(slow,0.55+0.45*(d/reach));
+        }
+      }
+      if(steer!==0)f.h+=clamp(steer,-1.5,1.5)*(chasing?1.4:2.8)*dt;
+      tS*=slow;
+    }
     if(desired===desired){const df=wrapA(desired-f.h);const m=rate*dt;f.h+=df>m?m:df<-m?-m:df;}
     else f.h+=f.turn*dt;
     f.sp_+=(tS-f.sp_)*Math.min(1,dt*(f.mode==='glide'&&!chasing?0.6:2));
@@ -820,7 +862,7 @@ function drawUI(){
   const b2c=b1c+b1.length+2;ui.push({r:rr,c0:b2c,c1:b2c+b2.length,act:'night'});
 }
 
-function update(dt){updateFish(dt);updatePellets(dt);updateMisc(dt);}
+function update(dt){updateFish(dt);resolveCollisions();updatePellets(dt);updateMisc(dt);}
 
 function draw(){
   chr.set(sChr);col.set(sCol);alp.set(sAlp);dep.set(sDep);
